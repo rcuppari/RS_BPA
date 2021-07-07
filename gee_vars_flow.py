@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Created on Wed Jun 30 08:37:25 2021
+Created on Wed Jul  7 08:48:21 2021
 
 @author: rcuppari
 """
@@ -15,8 +15,23 @@ import statsmodels.api as sm
 from sklearn.model_selection import train_test_split as tts
 import scipy.stats
 
-generation=pd.read_csv("../BPA/Hist_data/hist_monthly_gen.csv")
-gen_yr=generation.groupby('year').agg('mean')
+###############################################################################
+##also check with streamflow data 
+streamflow=pd.read_csv("Drive_Data/TDA6ARF_daily.csv")
+
+streamflow['date']=pd.to_datetime(streamflow.date)
+streamflow['year']=streamflow['date'].dt.year
+streamflow['month']=streamflow['date'].dt.month
+streamflow.columns=['date','flow','year','month']
+
+tda_mon=streamflow.groupby(['year','month']).agg('mean')
+tda_mon.reset_index(inplace=True)
+tda_mon['date']=pd.to_datetime(tda_mon[['year', 'month']].assign(DAY=1))
+tda_yr=streamflow.groupby('year').agg('mean')
+tda_yr.reset_index(inplace=True)
+
+##can use same codes as before slightly modified to get maximum corr with TDA flow
+
 months=np.arange(1,13)
 months2=['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec']
 
@@ -30,7 +45,7 @@ GRACE['month']=GRACE.DT.dt.month
 grace_yr=GRACE.groupby(['HYBAS_ID','year']).agg('mean')
 grace_yr.reset_index(inplace=True)
 
-subbasins=grace_yr.HYBAS_ID.unique()
+subbasins=grace_yr.DIST_SINK.unique()
 
 #this actually came out daily oddly 
 temp=pd.read_csv("Drive_Data/AVHRR_CSR_hybas4.csv")
@@ -68,7 +83,7 @@ def id_corrs(variable):
     corr={}
     for s in subbasins:
         sub_var=variable[variable['HYBAS_ID']==s]
-        join=pd.merge(sub_var[['year','mean','max','median','min']],gen_yr['Gen'],on='year')
+        join=pd.merge(sub_var[['year','mean','max','median','min']],tda_yr['flow','year'],on='year')
         corr[s]=join.corr()['Gen']
     return join, corr 
 
@@ -181,7 +196,7 @@ def id_corrs_mon(variable):
             sub_var=variable[variable['HYBAS_ID']==s]
             sub_var=sub_var[sub_var['month']==m]
             ##make df with generation 
-            join=pd.merge(sub_var[['year','mean','max','median','min']],gen_yr['Gen'],on='year')
+            join=pd.merge(sub_var[['year','mean','max','median','min']],tda_yr['flow','year'],on='year')
             ##make each column refer to corr between gen and a different month 
             ##for that same subbasin 
             corr_df.iloc[:,m-1]=join.corr()['Gen']
@@ -216,46 +231,23 @@ for i in range(0,len(variables)):
 ##now that we know which stats correlate most strongly with 
 ##generation, identify a regression and produce r2 
 #############################################################
-
-##start with monthly, go to annual 
-##this will only do one dataset at the time, not combine them
-
-##manually 
-sub_var=grace_yr[(grace_yr['HYBAS_ID']==7040379430)][['year','mean']]
-sub_var2=grace_yr[(grace_yr['HYBAS_ID']==7040379310)][['year','max']]
-comb=pd.merge(gen_yr,sub_var,on='year')
-comb=pd.merge(comb,sub_var2,on='year')
-
+    
+comb=pd.merge(tda_yr,grace_yr[grace_yr['HYBAS_ID']==489.9],on='year')
+print(comb.corr()['flow'])
 X=comb[['mean']]
 X=sm.add_constant(X)
 
-est=sm.OLS(comb['Gen'],X)
+est=sm.OLS(comb['flow'],X)
 est2=est.fit()
 print(est2.summary())
 r2=round(est2.rsquared_adj,3)
 pred=est2.predict(X)
 
-plt.scatter(pred,comb['Gen'])
-plt.xlabel("Predicted Generation")
-plt.ylabel("Observed Generation")
-plt.title("Use of GRACE Sub-basin data to predict generation")
-z = np.polyfit(pred, comb['Gen'], 1)
+plt.scatter(pred,comb['flow'])
+plt.xlabel("Predicted TDA Flow (cfs)",fontsize=14)
+plt.ylabel("Observed TDA Flow (cfs)",fontsize=14)
+plt.title("Use of annual GRACE sub-basin data to predict TDA flow",fontsize=16)
+z = np.polyfit(pred, comb['flow'], 1)
 p = np.poly1d(z)
 plt.plot(pred,p(pred),"r--")
-plt.annotate(('r2 = '+str(r2)),(8000,9500),fontsize=14)
-plt.show()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+plt.annotate(('r2 = '+str(r2)),(160000,220000),fontsize=14)
